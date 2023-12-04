@@ -1,0 +1,677 @@
+---
+title: "HeatMapper"
+format: html
+editor: visual
+---
+
+## Load libraries
+
+```{r}
+library('here')
+library('tidyverse')
+library('ggplot2')
+library('patchwork')
+```
+
+## Load data
+
+```{r}
+fix_list = function(list_of_loss){
+  cleaned_string <- gsub("\\[|\\]", "", list_of_loss)
+  numeric_values <- scan(text = cleaned_string,
+                         what = numeric(),
+                         sep = ",",
+                         quiet=TRUE)
+  return(numeric_values)
+}
+
+
+plot_last_val <- function(validation_loss, tail_amount){
+  validation_loss |>
+    unlist() |>
+    tail(tail_amount) |>
+    as_tibble() |>
+    ggplot(aes(seq_along(value), value)) + 
+    geom_line()
+}
+
+test_fill_text <- 'Average\ntest loss'
+validation_fill_text <- 'Validation\nloss\nminimum'
+```
+
+# Dense network
+
+### Load data
+
+```{r}
+dense_training_metadata_small <- read_delim(
+  file = here("data/_raw/dense_train_metadata_small.tsv"),
+  delim = '\t')
+
+dense_training_metadata_medium <- read_delim(
+  file = here("data/_raw/dense_train_metadata_medium.tsv"),
+  delim = '\t')
+
+dense_training_metadata_large <- read_delim(
+  file = here("data/_raw/dense_train_metadata_large.tsv"),
+  delim = '\t')
+
+dense_training_metadata_XL <- read_delim(
+  file = here("data/_raw/dense_train_metadata_XL.tsv"),
+  delim = '\t')
+
+
+dense_training_metadata <- bind_rows(
+  dense_training_metadata_small,
+  list(dense_training_metadata_medium,
+       dense_training_metadata_large,
+       dense_training_metadata_XL)) |>
+  rename('val_loss' = eval_loss)
+
+
+# Fix lists
+dense_data <- dense_training_metadata |>
+  select(where(~any(. != 0))) |>
+  filter(learning_rate >= 5e-06) |>
+  mutate(train_loss = map(.x = train_loss,
+                         .f = ~fix_list(.x)),
+         val_loss = map(.x = val_loss,
+                        .f = ~fix_list(.x)),
+         training_time = map(.x = training_time,
+                             .f = ~fix_list(.x)),
+         test_loss = map(.x = test_loss,
+                         .f = ~fix_list(.x))) |>
+  mutate(train_min = unlist(map(.x = train_loss,
+                         .f = ~min(.x))),
+         .after = training_runs) |>
+  mutate(val_min = unlist(map(.x = val_loss,
+                              .f = ~min(.x))),
+         .after = training_runs) |>
+  mutate(average_time = unlist(map(.x = training_time,
+                            .f = ~mean(.x))),
+         .after = train_min) |>
+  mutate_at(c('weight_decay', 'latent_features', 'learning_rate'), as.factor) |>
+  mutate(network_size = factor(network_size,
+                               levels = c("small", "medium", 'large', 'XL')))
+
+dense_data |>
+  group_by(network_size, weight_decay) |>
+  summarize(n=n())
+
+dense_data |>
+  group_by(network_size) |>
+  summarise(mean_params = mean(num_params))
+```
+
+### Plot validation
+
+```{r}
+lowest_val_dense <- dense_data |>
+  pull(val_min) |>
+  min()
+
+
+color_vector <- c(
+  "#69BD44",
+  "#5154A5", "#5154A5",
+  "#41B6E8", "#41B6E8",
+  "#FCE349", "#FCE349", "#FCE349",
+  "red", "red", "red", "red", "red", "red",
+  "grey", "grey"
+)
+
+val_p_d <-dense_data |>
+  ggplot(aes(x = learning_rate, y = weight_decay, fill = val_min)) +
+  geom_tile() +
+  scale_fill_gradientn(colours=color_vector,
+                       na.value = "grey",
+                       breaks=c(lowest_val_dense,0.37, 0.44, 0.54, 0.75),
+                       limits=c(lowest_val_dense,0.8),
+                       labels = scales::label_number(accuracy = 0.01)) +
+  facet_wrap(~network_size) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  labs(title = 'Dense network parameter search',
+       subtitle = 'Trained gtex data',
+       fill = validation_fill_text,
+       x = 'Learning rate',
+       y = 'Weight decay')
+
+val_p_d
+```
+
+### Plot test
+
+```{r}
+dense_data_avg_test <- dense_data |>
+  mutate(test_avg = unlist(map(.x = test_loss,
+                               .f = ~mean(unlist(.x)))),
+         .after = train_min)
+
+lowest_avg_test_dense <- dense_data_avg_test |>
+  pull(test_avg) |>
+  min()
+
+
+color_vector <- c(
+  "#69BD44",
+  "#5154A5", "#5154A5",
+  "#41B6E8", "#41B6E8",
+  "#FCE349", "#FCE349", "#FCE349",
+  "red", "red", "red", "red", "red", "red",
+  "grey", "grey"
+)
+
+test_p_d <- dense_data_avg_test |>
+  ggplot(aes(x = learning_rate, y = weight_decay, fill = test_avg)) +
+  geom_tile() +
+  scale_fill_gradientn(colours=color_vector,
+                       na.value = "grey",
+                       breaks=c(lowest_avg_test_dense, 0.26, 0.31, 0.39, 0.56),
+                       limits=c(lowest_avg_test_dense, 0.6),
+                       labels = scales::label_number(accuracy = 0.01)) +
+  facet_wrap(~network_size) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  labs(title = 'Dense network performance',
+       subtitle = 'Trained on gtex data',
+       fill = test_fill_text,
+       x = 'Learning rate',
+       y = 'Weight decay')
+
+test_p_d
+```
+
+# Select learning rates form best models to use for training PCA-Dense and Encoder-Dense
+
+These weight decays are to be used for the differing model sizes when training Encoder dense network
+
+```{r}
+best_learning_rates <- dense_data |>
+  group_by(network_size) |>
+  filter(val_min == min(val_min))
+
+best_learning_rates
+
+best_learning_rates |>
+  select(network_size, learning_rate, val_min)
+```
+
+# PCA DENSE
+
+### Load data
+
+```{r}
+# pca_dense metadata load
+pca_dense_training_metadata_small <- read_delim(
+  file = here("data/_raw/pca_dense_train_metadata_small.tsv"),
+  delim = '\t')
+
+pca_dense_training_metadata_medium <- read_delim(
+  file = here("data/_raw/pca_dense_train_metadata_medium.tsv"),
+  delim = '\t')
+
+pca_dense_training_metadata_large <- read_delim(
+  file = here("data/_raw/pca_dense_train_metadata_large.tsv"),
+  delim = '\t')
+
+pca_dense_training_metadata_XL <- read_delim(
+  file = here("data/_raw/pca_dense_train_metadata_XL.tsv"),
+  delim = '\t')
+
+
+pca_dense_training_metadata <- bind_rows(
+  list(pca_dense_training_metadata_small,
+       pca_dense_training_metadata_medium,
+       pca_dense_training_metadata_large,
+       pca_dense_training_metadata_XL)) |>
+  rename('val_loss' = eval_loss)
+
+
+# Fix lists
+PCAD_data <- pca_dense_training_metadata |>
+  select(where(~any(. != 0))) |>
+  mutate(train_loss = map(.x = train_loss,
+                         .f = ~fix_list(.x)),
+         val_loss = map(.x = val_loss,
+                        .f = ~fix_list(.x)),
+         training_time = map(.x = training_time,
+                             .f = ~fix_list(.x)),
+         test_loss = map(.x = test_loss,
+                         .f = ~fix_list(.x))) |>
+  mutate(train_min = unlist(map(.x = train_loss,
+                         .f = ~min(.x))),
+         .after = training_runs) |>
+  mutate(val_min = unlist(map(.x = val_loss,
+                              .f = ~min(.x))),
+         .after = training_runs) |>
+  mutate(average_time = unlist(map(.x = training_time,
+                            .f = ~mean(.x))),
+         .after = train_min) |>
+  mutate_at(c('weight_decay', 'latent_features'), as.factor) |>
+  mutate(network_size = factor(network_size,
+                               levels = c("small", "medium", 'large', 'XL'))) |>
+  filter(patience == 6)
+
+PCAD_data |>
+  group_by(network_size, weight_decay) |>
+  summarize(n=n())
+
+PCAD_data |>
+  group_by(network_size) |>
+  summarise(mean_params = mean(num_params))
+```
+
+### Plot validation
+
+```{r}
+lowest_val_PCAD <- PCAD_data |>
+  filter(val_min == min(val_min)) |>
+  pull(val_min)
+
+color_vector <- c(
+  "#69BD44",
+  "#41B6E8", "#41B6E8",
+  "#5154A5", "#5154A5",
+  "#FCE349", "#FCE349", "#FCE349",
+  "red", "red", "red", "red", "red", "red",
+  "grey", "grey"
+)
+
+val_p_PCAD <- PCAD_data |>
+  ggplot(aes(x = latent_features, y = weight_decay, fill = val_min)) +
+  geom_tile() +
+  scale_fill_gradientn(colours=color_vector,
+                       na.value = "grey",
+                       breaks=c(lowest_val_PCAD,0.43, 0.5, 0.57, 0.75),
+                       limits=c(lowest_val_PCAD,0.8),
+                       labels = scales::label_number(accuracy = 0.01)) +
+  facet_wrap(~network_size) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  labs(title = 'PCA-Dense network parameter search',
+       subtitle = 'PCA trained on archs4 & Dense network trained on gtex',
+       fill = validation_fill_text,
+       x = 'PCA size',
+       y = 'Weight decay')
+
+val_p_PCAD
+```
+
+### Plot test
+
+```{r}
+PCAD_data_avg_test <- PCAD_data|>
+  mutate(avg_test_loss = unlist(map(.x = test_loss,
+                                    .f = ~mean(.x))),
+         .after =network_name)
+
+PCAD_data |>
+  slice(1) |>
+  pull(test_loss) |>
+  unlist() |>
+  length()
+
+lowest_test_PCAD <- PCAD_data_avg_test |>
+  pull(avg_test_loss) |>
+  min()
+
+
+color_vector <- c(
+  "#69BD44",
+  "#5154A5", "#5154A5",
+  "#41B6E8", "#41B6E8",
+  "#FCE349", "#FCE349", "#FCE349",
+  "red", "red", "red", "red", "red", "red",
+  "grey", "grey"
+)
+
+test_p_PCAD <- PCAD_data_avg_test |>
+  ggplot(aes(x = latent_features, y = weight_decay, fill = avg_test_loss)) +
+  geom_tile() +
+  scale_fill_gradientn(colours=color_vector,
+                       na.value = "grey",
+                       breaks=c(lowest_test_PCAD, 0.25, 0.32, 0.4, 0.56),
+                       limits=c(lowest_test_PCAD,0.6),
+                       labels = scales::label_number(accuracy = 0.01)) +
+  facet_wrap(~network_size) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+    labs(title = 'PCA-Dense network performance',
+       subtitle = 'PCA trained on archs4 & Dense network trained on gtex',
+       fill = test_fill_text,
+       x = 'PCA size',
+       y = 'Weight decay')
+
+test_p_PCAD
+```
+
+# VAE
+
+### Load data
+
+```{r}
+last_10_avg <- function(validation_loss){
+  mean_tail10 <- validation_loss |>
+    unlist() |>
+    tail(10) |>
+    mean()
+  
+  return(mean_tail10)
+}
+
+# VAE training metadata
+VAE_training_metadata <- read_tsv(
+  file=here("data/_raw/vae_train_metadata.tsv")
+)
+
+VAE_all <- VAE_training_metadata |> 
+  select(where(~any(. != 0))) |>
+  mutate(train_loss = map(.x = train_loss,
+                          .f = ~fix_list(.x)),
+         training_time = map(.x = training_time,
+                             .f = ~fix_list(.x)),
+         training_beta_kl_loss = map(.x = training_beta_kl_loss,
+                                     .f = ~fix_list(.x)),
+         training_recon_loss = map(.x = training_recon_loss,
+                                   .f = ~fix_list(.x)) ,
+         val_loss = map(.x = val_loss,
+                        .f = ~fix_list(.x)),
+         validation_beta_kl_loss = map(.x = validation_beta_kl_loss,
+                                   .f = ~fix_list(.x)) ,
+         validation_recon_loss = map(.x = validation_recon_loss,
+                                   .f = ~fix_list(.x))) |>
+  mutate(train_min = unlist(map(.x = train_loss,
+                            .f = ~min(.x))),
+         .after = training_runs) |>
+  mutate(val_min = unlist(map(.x = val_loss,
+                               .f = ~min(.x))),
+         .after = training_runs) |>
+  mutate(recon_min = unlist(map(.x = validation_recon_loss,
+                                .f = ~min(.x))),
+         .after = training_runs) |>
+  mutate(beta_kl_min = unlist(map(.x = validation_beta_kl_loss,
+                                  .f = ~min(.x)))) |>
+  mutate(average_time = unlist(map(.x = training_time,
+                            .f = ~mean(.x))),
+         .after = train_min) |>
+  mutate_at(c('latent_features', 'beta'), as.factor)
+
+# Check if all models have been trained
+VAE_data <- VAE_all |>
+  filter(training_runs!=100)
+
+VAE_data_100 <- VAE_all |>
+  filter(training_runs==100) |>
+  mutate(val_tail10_avg = unlist(map(.x = val_loss,
+                                     .f = ~last_10_avg(.x))),
+         .after = val_min)
+
+VAE_data |>
+  summarise(n = n())
+
+VAE_data_100 |>
+  summarise(n=n())
+```
+
+### Plot validation
+
+These are data of VAE loss from a training run using early stopping with the following parameters
+
+-lf \${lf} -b \${beta} -bs 500 -lr 1e-4 -hl 128 -e 50 -p 100 --sm
+
+```{r}
+
+parameters <- c(2677488149, 980140565, 400426517, 177809429, 83310869, 40264085, 19791317, 9817589)
+
+VAE_train_times <- VAE_data |>
+  group_by(network_name) |>
+  summarise(training_time_minutes = sum(unlist(training_time))/60)
+
+lowest_train_VAE <- VAE_data |>
+  filter(val_min == min(val_min)) |>
+  pull(val_min)
+
+color_vector <- c(
+  "#69BD44",
+  "#41B6E8",
+  "#5154A5", "#5154A5",
+  "#FCE349", "#FCE349", "#FCE349",
+  "red", "red", "red", "red", "red", "red",
+  "grey", "grey"
+)
+
+val_p_VAE50 <- VAE_data |>
+  ggplot(aes(x = latent_features, y = beta, fill = val_min)) +
+  geom_tile() +
+    scale_fill_gradientn(colours=color_vector,
+                       na.value = "darkgrey",
+                       breaks=c(lowest_train_VAE, 2.17, 2.26, 2.45),
+                       limits=c(lowest_train_VAE,2.5),
+                       labels=scales::label_number(accuracy = 0.01)) +
+  theme_minimal() +
+  labs(title = 'VAE parameter search',
+       subtitle = 'Trained on archs4 data',
+       fill = validation_fill_text,
+       x = 'Latent Features',
+       y = 'Beta')
+
+val_p_VAE50
+```
+
+### Plot validation 100e no early stopping
+
+-lf \${lf} -b \${beta} -bs 500 -lr 1e-4 -hl 128 -e 100 -p 100 --sm
+
+```{r}
+lowest_train_VAE_100 <- VAE_data_100 |>
+  filter(val_tail10_avg == min(val_tail10_avg)) |>
+  pull(val_tail10_avg)
+
+color_vector <- c(
+  "#69BD44",
+  "#41B6E8",
+  "#5154A5", "#5154A5",
+  "#FCE349", "#FCE349", "#FCE349",
+  "red", "red", "red", "red", "red", "red",
+  "grey", "grey"
+)
+
+val_p_VAE100 <- VAE_data_100 |>
+  ggplot(aes(x = latent_features, y = beta, fill = val_tail10_avg)) +
+  geom_tile() +
+    scale_fill_gradientn(colours=color_vector,
+                       na.value = "darkgrey",
+                       breaks=c(lowest_train_VAE_100, 2.15, 2.24, 2.45),
+                       limits=c(lowest_train_VAE_100,2.5),
+                       labels=scales::label_number(accuracy = 0.01)) +
+  theme_minimal() +
+  labs(title = 'VAE parameter search',
+       subtitle = 'Trained on archs4 without early stopping with 100 epochs',
+       fill = 'Average of\nlast 10\nvalidation loss',
+       x = 'Latent Features',
+       y = 'Beta')
+
+val_p_VAE100
+```
+
+# Select best performing VAEs across different the different latent feature sizes
+
+Used to trained the Encoder-Dense networks
+
+```{r}
+best_performing_VAEs <- VAE_data_100 |>
+  group_by(latent_features) |>
+  filter(val_tail10_avg == min(val_tail10_avg))
+
+best_performing_VAEs |>
+  select(latent_features, beta, val_tail10_avg, num_params) |>
+  arrange(latent_features)
+```
+
+# Encoder Dense
+
+### Load data
+
+```{r}
+# pca_dense metadata load
+enc_dense_training_metadata_small <- read_delim(
+  file = here("data/_raw/encoder_dense_train_metadata_small.tsv"),
+  delim = '\t')
+
+pca_dense_training_metadata_medium <- read_delim(
+  file = here("data/_raw/encoder_dense_train_metadata_medium.tsv"),
+  delim = '\t')
+
+pca_dense_training_metadata_large <- read_delim(
+  file = here("data/_raw/encoder_dense_train_metadata_large.tsv"),
+  delim = '\t')
+
+pca_dense_training_metadata_XL <- read_delim(
+  file = here("data/_raw/encoder_dense_train_metadata_XL.tsv"),
+  delim = '\t')
+
+
+enc_dense_training_metadata <- bind_rows(
+  list(enc_dense_training_metadata_small,
+       pca_dense_training_metadata_medium,
+       pca_dense_training_metadata_large,
+       pca_dense_training_metadata_XL))|>
+  rename('val_loss' = eval_loss)
+
+
+# Fix lists
+EncD_data <- enc_dense_training_metadata |>
+  select(where(~any(. != 0))) |>
+  mutate(train_loss = map(.x = train_loss,
+                         .f = ~fix_list(.x)),
+         val_loss = map(.x = val_loss,
+                        .f = ~fix_list(.x)),
+         training_time = map(.x = training_time,
+                             .f = ~fix_list(.x)),
+         test_loss = map(.x = test_loss,
+                         .f = ~fix_list(.x))) |>
+  mutate(train_min = unlist(map(.x = train_loss,
+                         .f = ~min(.x))),
+         .after = training_runs) |>
+  mutate(val_min = unlist(map(.x = val_loss,
+                              .f = ~min(.x))),
+         .after = training_runs) |>
+  mutate(average_time = unlist(map(.x = training_time,
+                            .f = ~mean(.x))),
+         .after = train_min) |>
+  mutate_at(c('weight_decay', 'latent_features', 'beta'), as.factor) |>
+  mutate(network_size = factor(network_size,
+                               levels = c("small", "medium", 'large', 'XL'))) |>
+  filter(patience == 10)
+
+EncD_data |>
+  group_by(network_size) |>
+  summarize(n=n())
+
+EncD_data |>
+  group_by(network_size, weight_decay) |>
+  summarize(n=n())
+
+EncD_data |>
+  group_by(network_size) |>
+  summarise(mean_params = mean(num_params))
+
+EncD_data
+```
+
+### Plot validation
+
+```{r}
+lowest_val_EncD <- EncD_data |>
+  pull(val_min) |>
+  min()
+
+
+color_vector <- c(
+  "#69BD44",
+  "#5154A5", "#5154A5",
+  "#41B6E8", "#41B6E8",
+  "#FCE349", "#FCE349", "#FCE349",
+  "red", "red", "red", "red", "red", "red",
+  "grey", "grey"
+)
+
+
+val_p_EncD <- EncD_data |>
+  ggplot(aes(x = latent_features, y = weight_decay, fill = val_min)) +
+  geom_tile() +
+  scale_fill_gradientn(colours=color_vector,
+                       na.value = "grey",
+                       breaks=c(lowest_val_EncD,0.70, 0.64, 0.67,0.78),
+                       limits=c(lowest_val_EncD,0.8),
+                       labels = scales::label_number(accuracy = 0.01)) +
+  facet_wrap(~network_size) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  labs(title = 'Encoder-Dense network parameter search',
+       subtitle = 'VAE trained on archs4 & Dense network trained on gtex',
+       fill = validation_fill_text,
+       x = 'Encoder latent features',
+       y = 'L2 Weight Decay')
+
+val_p_EncD
+```
+
+### Plot test
+
+```{r}
+EncD_data_avg_test <- EncD_data |>
+  mutate(test_avg = unlist(map(.x = test_loss,
+                               .f = ~mean(unlist(.x)))),
+         .after = train_min)
+
+lowest_avg_test_EncD <- EncD_data_avg_test |>
+  pull(test_avg) |>
+  min()
+
+
+color_vector <- c(
+  "#69BD44",
+  "#5154A5", "#5154A5",
+  "#41B6E8", "#41B6E8",
+  "#FCE349", "#FCE349", "#FCE349",
+  "red", "red", "red", "red", "red", "red",
+  "grey", "grey"
+)
+
+test_p_EncD <- EncD_data_avg_test |>
+  ggplot(aes(x = latent_features, y = weight_decay, fill = test_avg)) +
+  geom_tile() +
+  scale_fill_gradientn(colours=color_vector,
+                       na.value = "grey",
+                       breaks=c(lowest_avg_test_EncD, 0.45, 0.49, 0.43, 0.58),
+                       limits=c(lowest_avg_test_EncD, 0.6),
+                       labels = scales::label_number(accuracy = 0.01)) +
+  facet_wrap(~network_size) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  labs(title = 'Encoder-Dense network performance',
+       subtitle = 'VAE trained on archs4 & Dense network trained on gtex',
+       fill = test_fill_text,
+       x = 'Encoder latent features',
+       y = 'L2 Weight Decay')
+
+test_p_EncD
+```
+
+# Patching together plots
+
+```{r}
+validation_plots <- val_p_d + val_p_PCAD + val_p_EncD
+ggsave(filename = 'validation_plots.png', 
+       plot = validation_plots,
+       height = 7,
+       width = 15)
+
+test_plots <- test_p_d + test_p_PCAD + test_p_EncD
+ggsave(filename = 'test_plots.png', 
+       plot = test_plots,
+       height = 7,
+       width = 15)
+```

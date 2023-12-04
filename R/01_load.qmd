@@ -1,0 +1,174 @@
+---
+title: "01_load"
+format: html
+editor: visual
+---
+
+## Load libraries
+
+```{r}
+library('here')
+library('tidyverse')
+```
+
+## Load and tidy data
+
+Function to fix lists to tidy
+
+```{r}
+fix_list = function(list_of_loss){
+  cleaned_string <- gsub("\\[|\\]", "", list_of_loss)
+  numeric_values <- scan(text = cleaned_string,
+                         what = numeric(),
+                         sep = ",",
+                         quiet=TRUE)
+  return(numeric_values)
+}
+```
+
+### PCA Dense data
+
+```{r}
+# pca_dense metadata load
+pca_dense_training_metadata_small <- read_delim(
+  file = here("data/_raw/pca_dense_train_metadata_small.tsv"),
+  delim = '\t')
+
+pca_dense_training_metadata_medium <- read_delim(
+  file = here("data/_raw/pca_dense_train_metadata_medium.tsv"),
+  delim = '\t')
+
+pca_dense_training_metadata_large <- read_delim(
+  file = here("data/_raw/pca_dense_train_metadata_large.tsv"),
+  delim = '\t')
+
+#pca_dense_training_metadata_XL <- read_delim(
+#  file = here("data/_raw/pca_dense_train_metadata_large.tsv"),
+#  delim = '\t')
+#
+#pca_dense_training_metadata_XXL <- read_delim(
+#  file = here("data/_raw/pca_dense_train_metadata_large.tsv"),
+#  delim = '\t')
+
+pca_dense_training_metadata <- bind_rows(
+  list(pca_dense_training_metadata_small,
+       pca_dense_training_metadata_medium,
+       pca_dense_training_metadata_large))
+
+
+# Fix lists
+PCAD_data <- pca_dense_training_metadata |>
+  select(where(~any(. != 0))) |>
+  mutate(train_loss = map(.x = train_loss,
+                         .f = ~fix_list(.x)),
+         eval_loss = map(.x = eval_loss,
+                        .f = ~fix_list(.x)),
+         training_time = map(.x = training_time,
+                             .f = ~fix_list(.x)),
+         test_loss = map(.x = test_loss,
+                         .f = ~fix_list(.x))) |>
+  mutate(train_min = unlist(map(.x = train_loss,
+                         .f = ~min(.x))),
+         .after = training_runs) |>
+  mutate(eval_min = unlist(map(.x = eval_loss,
+                         .f = ~min(.x))),
+         .after = training_runs) |>
+  mutate(average_time = unlist(map(.x = training_time,
+                            .f = ~mean(.x))),
+         .after = train_min) |>
+  mutate_at(c('weight_decay', 'latent_features'), as.factor)
+
+PCAD_data |>
+  filter(network_size == 'large') |>
+  view()
+
+PCAD_data
+```
+
+### VAE Data
+
+```{r}
+# VAE training metadata
+VAE_training_metadata <- read_delim(
+  file=here("data/_raw/vae_train_metadata.tsv")
+)
+
+VAE_data <- VAE_training_metadata |> 
+  select(where(~any(. != 0))) |>
+  mutate(train_loss = map(.x = train_loss,
+                          .f = ~fix_list(.x)),
+         training_time = map(.x = training_time,
+                             .f = ~fix_list(.x)),
+         training_beta_kl_loss = map(.x = training_beta_kl_loss,
+                                     .f = ~fix_list(.x)),
+         training_recon_loss = map(.x = training_recon_loss,
+                                   .f = ~fix_list(.x)) ,
+         val_loss = map(.x = val_loss,
+                        .f = ~fix_list(.x)),
+         validation_beta_kl_loss = map(.x = validation_beta_kl_loss,
+                                   .f = ~fix_list(.x)) ,
+         validation_recon_loss = map(.x = validation_recon_loss,
+                                   .f = ~fix_list(.x))) |>
+  mutate(train_min = unlist(map(.x = train_loss,
+                         .f = ~min(.x))),
+         .after = training_runs) |>
+  mutate(average_time = unlist(map(.x = training_time,
+                            .f = ~mean(.x))),
+         .after = train_min) |>
+  mutate_at(c('latent_features', 'beta'), as.factor)
+
+# Check if all models have been trained
+n_models <- VAE_data |>
+  summarise(n = n()) |>
+  pull()
+
+paste(as.character(n_models), 'should be 56')
+```
+
+### Encoder Dense data
+
+```{r}
+## encoder_dense metadata load
+#encoder_dense_train_metadata_small <- read_delim(
+#  file=here("data/encoder_dense_train_metadata_small.tsv"),
+#  delim = '\t'
+#)
+#encoder_dense_train_metadata_medium <- read_delim(
+#  file=here("data/encoder_dense_train_metadata_medium.tsv"),
+#  delim = '\t'
+#)
+#encoder_dense_train_metadata_large <- read_delim(
+#  file=here("data/encoder_dense_train_metadata_large.tsv"),
+#  delim = '\t'
+#)
+#
+#encoder_dense_training_metadata <- encoder_dense_train_metadata_small
+
+#encoder_dense_training_metadata <- bind_rows(
+#  list(encoder_dense_training_metadata_small,
+#       encoder_dense_training_metadata_medium,
+#       encoder_dense_training_metadata_large))
+
+EncD_data <- encoder_dense_training_metadata |>
+  select(where(~any(. != 0))) |>
+  mutate(train_loss = map(.x = train_loss,
+                         .f = ~fix_list(.x)),
+         eval_loss = map(.x = eval_loss,
+                        .f = ~fix_list(.x)),
+         training_time = map(.x = training_time,
+                             .f = ~fix_list(.x)),
+         test_loss = map(.x = test_loss,
+                         .f = ~fix_list(.x))) |>
+  mutate(train_min = unlist(map(.x = train_loss,
+                         .f = ~min(.x))),
+         .after = training_runs) |>
+  mutate(eval_min = unlist(map(.x = eval_loss,
+                         .f = ~min(.x))),
+         .after = training_runs) |>
+  mutate(average_time = unlist(map(.x = training_time,
+                            .f = ~mean(.x))),
+         .after = train_min) |>
+  mutate_at(c('weight_decay', 'latent_features'), as.factor)
+
+#EncD_data <- write_tsv(here('data/EncD_metadata.tsv'))
+```
