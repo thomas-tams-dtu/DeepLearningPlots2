@@ -1,0 +1,7 @@
+"0","best_performing_VAEs <- VAE_data_100 |>"
+"0","  group_by(latent_features) |>"
+"0","  filter(val_tail10_avg == min(val_tail10_avg))"
+"0",""
+"0","best_performing_VAEs |>"
+"0","  select(latent_features, beta, val_tail10_avg, num_params) |>"
+"0","  arrange(latent_features)"

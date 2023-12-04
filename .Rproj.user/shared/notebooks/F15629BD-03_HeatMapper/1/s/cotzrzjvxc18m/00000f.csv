@@ -1,0 +1,5 @@
+"0","#VAE_data |>"
+"0","#  slice(1) |>"
+"0","#  select(validation_recon_loss, validation_beta_kl_loss) |>"
+"0","#  ggplot(aes(x = validation_recon_loss)) +"
+"0","#  geom_point()"

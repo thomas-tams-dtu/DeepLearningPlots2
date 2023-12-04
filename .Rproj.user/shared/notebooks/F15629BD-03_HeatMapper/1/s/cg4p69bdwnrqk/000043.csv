@@ -1,0 +1,5 @@
+"0","best_learning_rates <- dense_data |>"
+"0","  group_by(network_size) |>"
+"0","  filter(val_min == min(val_min))"
+"0",""
+"0","best_learning_rates"

@@ -1,0 +1,31 @@
+{
+    "id": "7A82AE56",
+    "path": "D:/DeepLearning/DeepLearningPlots/R/03_HeatMapper.qmd",
+    "project_path": "R/03_HeatMapper.qmd",
+    "type": "quarto_markdown",
+    "hash": "0",
+    "contents": "",
+    "dirty": false,
+    "created": 1701270459150.0,
+    "source_on_save": false,
+    "relative_order": 6,
+    "properties": {
+        "rmdVisualMode": "true",
+        "rmdVisualWrapConfigured": "true",
+        "source_window_id": "",
+        "Source": "Source",
+        "docOutlineVisible": "1",
+        "rmdVisualCollapsedChunks": "",
+        "rmdVisualModeLocation": "59:0",
+        "cursorPosition": "660,0",
+        "scrollLine": "0"
+    },
+    "folds": "",
+    "lastKnownWriteTime": 1701692040,
+    "encoding": "UTF-8",
+    "collab_server": "",
+    "source_window": "",
+    "last_content_update": 1701692038274,
+    "read_only": false,
+    "read_only_alternatives": []
+}

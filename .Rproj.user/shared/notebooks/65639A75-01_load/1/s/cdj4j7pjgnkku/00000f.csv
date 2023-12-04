@@ -1,0 +1,8 @@
+"0","fix_list = function(list_of_loss){"
+"0","  cleaned_string <- gsub(""\\[|\\]"", """", list_of_loss)"
+"0","  numeric_values <- scan(text = cleaned_string,"
+"0","                         what = numeric(),"
+"0","                         sep = "","","
+"0","                         quiet=TRUE)"
+"0","  return(numeric_values)"
+"0","}"
