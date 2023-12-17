@@ -1,0 +1,49 @@
+---
+title: "PCA_plotting"
+format: html
+editor: visual
+---
+
+## Load libs
+
+```{r}
+library('tidyverse')
+library('ggplot2')
+library('here')
+```
+
+## Load PCA data
+
+```{r}
+PCA_dat <- read_tsv(here("data/_raw/pca_output.tsv"), col_names = FALSE) |>
+  rename(PC1 = 'X1',
+         PC2 = 'X2',
+         tissue = 'X3')
+
+PCA_dat
+```
+
+```{r}
+above_threshold_tissues <- PCA_dat |>
+  group_by(tissue) |>
+  summarise(n = n()) |>
+  filter(n > 400) |>
+  pull(tissue)
+
+PCA_dat_cat_reduced <- PCA_dat |>
+  mutate(tissue = unlist(map(.x = tissue,
+                             .f = ~case_when(.x %in% above_threshold_tissues ~ .x,
+                                             .default = "other"))))
+
+?case_when
+```
+
+## Plot the data
+
+```{r}
+explained_variance <- c('20.3', '10.4')
+
+PCA_dat_cat_reduced |>
+  ggplot(aes(x = PC1, y = PC2, color = tissue)) +
+  geom_point()
+```

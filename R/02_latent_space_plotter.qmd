@@ -1,0 +1,225 @@
+---
+title: "Latent_space_plotter"
+format: html
+editor: visual
+---
+
+## Load libraries
+
+```{r}
+library('tidyverse')
+library('here')
+library('patchwork')
+library('gganimate')
+```
+
+## Load metadata
+
+```{r}
+fix_list = function(list_of_loss){
+  cleaned_string <- gsub("\\[|\\]", "", list_of_loss)
+  numeric_values <- scan(text = cleaned_string,
+                         what = numeric(),
+                         sep = ",",
+                         quiet=TRUE)
+  return(numeric_values)
+}
+
+
+plot_last_val <- function(validation_loss, tail_amount){
+  validation_loss |>
+    unlist() |>
+    tail(tail_amount) |>
+    as_tibble() |>
+    ggplot(aes(seq_along(value), value)) + 
+    geom_line()
+}
+
+last_10_avg <- function(validation_loss){
+  mean_tail10 <- validation_loss |>
+    unlist() |>
+    tail(10) |>
+    mean()
+  
+  return(mean_tail10)
+}
+
+# VAE training metadata
+VAE_training_metadata <- read_tsv(
+  file=here("data/_raw/my_VAE_train_metadata.tsv")
+)
+
+VAE_all <- VAE_training_metadata |> 
+  select(where(~any(. != 0))) |>
+  mutate(train_loss = map(.x = train_loss,
+                          .f = ~fix_list(.x)),
+         training_time = map(.x = training_time,
+                             .f = ~fix_list(.x)),
+         training_beta_kl_loss = map(.x = training_beta_kl_loss,
+                                     .f = ~fix_list(.x)),
+         training_recon_loss = map(.x = training_recon_loss,
+                                   .f = ~fix_list(.x)) ,
+         val_loss = map(.x = val_loss,
+                        .f = ~fix_list(.x)),
+         validation_beta_kl_loss = map(.x = validation_beta_kl_loss,
+                                   .f = ~fix_list(.x)) ,
+         validation_recon_loss = map(.x = validation_recon_loss,
+                                   .f = ~fix_list(.x))) |>
+  mutate(train_min = unlist(map(.x = train_loss,
+                            .f = ~min(.x))),
+         .after = training_runs) |>
+  mutate(val_min = unlist(map(.x = val_loss,
+                               .f = ~min(.x))),
+         .after = training_runs) |>
+  mutate(recon_min = unlist(map(.x = validation_recon_loss,
+                                .f = ~min(.x))),
+         .after = training_runs) |>
+  mutate(beta_kl_min = unlist(map(.x = validation_beta_kl_loss,
+                                  .f = ~min(.x)))) |>
+  mutate(average_time = unlist(map(.x = training_time,
+                                   .f = ~mean(.x))),
+         .after = train_min) |>
+  mutate_at(c('latent_features', 'beta'), as.factor)
+
+# Check if all models have been trained
+VAE_data <- VAE_all
+
+VAE_data |>
+  summarise(n = n())
+
+VAE_data_plots <- VAE_data |>
+  mutate(recon_plots = map(.x = training_recon_loss,
+                           .f = ~plot_last_val(validation_loss = .x,
+                                              tail_amount = 50))) |>
+  mutate(kl_plots = map(.x = training_beta_kl_loss,
+                        .f = ~plot_last_val(validation_loss = .x,
+                                            tail_amount = 50)))
+
+one <- VAE_data_plots |>
+  pull(kl_plots)
+
+two <- VAE_data_plots |>
+  pull(recon_plots)
+
+one[2]
+two[2]
+```
+
+## Load data
+
+```{r}
+load_latent_data <- function(data_dir, model_name, num_epochs){
+  tsv_files <- sprintf("%s/%d_%s.tsv", data_dir, seq(1, num_epochs), model_name) |>
+    as_tibble() |>
+    rename(file_path = 'value')
+  
+  all_epochs_data <- tsv_files |>
+    mutate(latent_coords = map(.x = file_path,
+                               .f = ~read_tsv(.x))) |>
+    mutate(latent_coords = map(.x = latent_coords,
+                                   .f = ~as_tibble(.x)))
+  
+  return(all_epochs_data)
+}
+
+
+plot_latent_datapoints <- function(coord_data){
+  p <- coord_data |>
+    ggplot(aes(x = x_coord, y = y_coord)) +
+    geom_bin2d(aes(fill = log2(..count..)), bins = 150)
+    #geom_density_2d()
+  
+  return(p)
+}
+```
+
+```{r}
+
+
+#?log1p
+#?geom_bin2d
+
+# VAE_e10_lf2_b1.0_hl128_lr0.0001
+# VAE_e10_lf2_b1e-05_hl128_lr0.0001
+# VAE_e30_lf2_b1e-06_hl128_lr0.0001
+# VAE_e30_lf2_b0.0_hl128_lr0.0001
+# my_VAE_e50_lf2_b0.0_hl128_lr0.0001
+
+# my_VAE_e15_lf2_b1.0_hl128_lr0.0001
+# my_VAE_e15_lf2_b0.1_hl128_lr0.0001
+# my_VAE_e15_lf2_b0.001_hl128_lr0.0001
+# my_VAE_e15_lf2_b0.0001_hl128_lr0.0001
+# my_VAE_e15_lf2_b1e-05_hl128_lr0.0001
+# my_VAE_e15_lf2_b1e-06_hl128_lr0.0001
+# my_VAE_e15_lf2_b0.0_hl128_lr0.0001
+
+# my_VAE_e30_lf16_b0.0_hl128_lr0.0001
+
+master_tibble <- load_latent_data(
+  data_dir = here("data/_raw/latent_space_points"),
+  model_name = "my_VAE_e30_lf16_b0.0_hl128_lr0.0001",
+  num_epochs = 2)
+
+master_tibble <- master_tibble |>
+  mutate(epoch = seq_len(nrow(master_tibble)),
+         .after = file_path)
+
+master_unnest <- master_tibble |>
+  group_by(epoch)|>
+  unnest(latent_coords) |>
+  ungroup()
+
+animation <- master_unnest |>
+  ggplot(aes(x = x_coord, y = y_coord)) +
+  geom_bin2d(aes(fill = log2(..count..)), bins = 150) +
+  scale_size(range = c(2, 12)) +
+  transition_time(epoch) +
+  ease_aes('linear')
+
+anim_save('yooo.gif', animation)
+
+#plot_tibble <- master_tibble |>
+#  mutate(plot = map(.x = latent_coords,
+#                     .f = ~plot_latent_datapoints(.x)))
+
+#plot_tibble |>
+#  pull(plot)
+
+
+#master_tibble |> View()
+```
+
+```{r}
+plots_list <- plot_tibble |>
+  pull(plot)
+
+gganimate::gg_animate("output.gif", interval = 1, ani.width = 800, ani.height = 600)
+```
+
+```{r}
+
+# b1.0
+# b0.001
+# b0.0001
+# b1e-05
+# b1e-06
+# b0.0
+
+encoded_data <- read_tsv(file = here("data/_raw/latent_space_points/encoder_latent_space_b1.0.tsv"))
+
+
+encoded_data |>
+  group_by(Tissue) |>
+  summarise(n=n())
+
+big_group_names <- encoded_data_split |>
+  group_by(main_name) |>
+  summarise(n=n()) |>
+  pull(main_name)
+
+encoded_data_split |>
+  filter(main_name %in% big_group_names) |>
+  ggplot(aes(x = z1, y = z2, color = main_name)) +
+  geom_point() +
+  facet_wrap(~main_name)
+```

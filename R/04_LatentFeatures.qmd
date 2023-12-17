@@ -1,0 +1,55 @@
+---
+title: "LatentFeatures"
+format: html
+editor: visual
+---
+
+## Load libraries
+
+```{r}
+library('tidyverse')
+library('here')
+library('ggplot2')
+```
+
+## Load data
+
+```{r}
+encoded_data <- read_csv(file = here("data/_raw/encoded_data.csv"), col_names=FALSE) |>
+  rename(z1 = 'X1',
+         z2 = 'X2',
+         Tissue = 'X3')
+
+encoded_data
+```
+
+## Amalgamate tissues
+
+```{r}
+encoded_data |>
+  group_by(Tissue) |>
+  summarise(n=n())
+
+encoded_data_split <- encoded_data |>
+  separate_wider_delim(cols = Tissue,
+                       names = c('main_name', 'surname'),
+                       delim = '-',
+                       too_few = "align_start",
+                       too_many = "merge")
+big_group_names <- encoded_data_split |>
+  group_by(main_name) |>
+  summarise(n=n()) |>
+  filter(n > 500) |>
+  pull(main_name)
+
+
+```
+
+```{r}
+latent_features_plot <- encoded_data_split |>
+  filter(main_name %in% big_group_names) |>
+  ggplot(aes(x = z1, y = z2, color = main_name)) +
+  geom_point()
+
+ggsave('encoder_latent_feature_blob.png', latent_features_plot)
+```
